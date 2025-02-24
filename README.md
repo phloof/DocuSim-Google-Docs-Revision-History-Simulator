@@ -1,4 +1,4 @@
-# DocuSim: Google Docs Revision History Simulator
+# DocuSim: Google Docs/OneNote Revision History Simulator
 
 ## Overview
 
