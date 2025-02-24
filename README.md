@@ -1,8 +1,8 @@
-# DocuSim: Google Docs/OneNote Revision History Simulator
+# DocuSim: Google Docs/OneNote Version History Simulator
 
 ## Overview
 
-**DocuSim** is a Python program designed to demonstrate the potential unreliability of Google Docs revision history as a sole source of truth for determining the creation process of a document.  It simulates human-like typing behavior, complete with realistic pauses, errors, corrections, and variations in typing speed, to generate a plausible revision history within a Google Docs document.  This is *not* intended for malicious use, but rather for educational purposes and to highlight the limitations of relying solely on revision history for forensic analysis or determining authorship attribution.
+**DocuSim** is a Python program designed to demonstrate the potential unreliability of Google Docs/OneNote (etc) revision history as a sole source of truth for determining the creation process of a document.  It simulates human-like typing behavior, complete with realistic pauses, errors, corrections, and variations in typing speed, to generate a plausible revision history within a Google Docs document.  This is *not* intended for malicious use, but rather for educational purposes and to highlight the limitations of relying solely on revision history for forensic analysis or determining authorship attribution.
 
 ## Features
 
@@ -110,8 +110,13 @@ DocuSim offers extensive parameter customization:
 
 *   **Simplified Error Model:** The grammatical and punctuation error models are relatively basic.  They don't represent the full range of human errors.
 *   **No Contextual Awareness:** The typing simulation is not context-aware.  It doesn't understand the meaning of the text it's typing.
-*   **QWERTY Keyboard Only:** The `get_adjacent_key` function is designed for a standard QWERTY keyboard layout. It won't work correctly for other keyboard layouts.
 * **No Mouse Movements/Clicks:** The current version of the program only emulates keyboard input. It doesn't simulate mouse activity, scrolling, or other interactions with the Google Docs interface.
+
+## Future Features
+* **AI Writing Mimicing:** In future (if i have spare time o-o) sample text can be provided to the user for them to type, the model will then learn mistakes made, pauses, WPM speed etc for a user, these can be manually tweaked as well --> built in writing style can be added, e.g. fast, slow, average to more simply implment ¯\_(ツ)_/¯
+* **Non Focused Window Support:** Currently the program mimics keyboard input using pynput (VERY SIMPLE LUL), tabbed out windows could be generated (not necessary for personal usecase, (will add if I have spare time ¯\_(ツ)_/¯)
+* **Context Awareness:** Text can first be parsed into LLM asking for where to take breaks as a human would, etc e.g. ("Mimic how long it would take for a human to write the following task providing breaks formatted as "300s delay" where logical, etc)
+* **Purposefully misspelt word dictionary:** To further mimic writing style words can be added to a dictionary to be purposefully misspelt
 
 ## Disclaimer
 
