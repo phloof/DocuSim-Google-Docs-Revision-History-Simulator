@@ -113,6 +113,7 @@ DocuSim offers extensive parameter customization:
 * **No Mouse Movements/Clicks:** The current version of the program only emulates keyboard input. It doesn't simulate mouse activity, scrolling, or other interactions with the Google Docs interface.
 
 ## Improvement To Be Made
+* **Fake Revision:** LLM API can be used to generate text that is poorer in quality which is then dleted an replaced with the original placed text randomly.
 * **AI Writing Mimicing:** In future (if i have spare time o-o) sample text can be provided to the user for them to type, the model will then learn mistakes made, pauses, WPM speed etc for a user, these can be manually tweaked as well --> built in writing style can be added, e.g. fast, slow, average to more simply implment ¯\_(ツ)_/¯
 * **Non Focused Window Support:** Currently the program mimics keyboard input using pynput (VERY SIMPLE LUL), tabbed out windows could be generated (not necessary for personal usecase, (will add if I have spare time ¯\_(ツ)_/¯) use selenium
 * **Context Awareness:** Text can first be parsed into LLM asking for where to take breaks as a human would, etc e.g. ("Mimic how long it would take for a human to write the following task providing breaks formatted as "300s delay" where logical, etc) addmore complex context based content spacing and typing burst and pauses based on fabricated "research", "thought" etc, format withing paragraphs using square brackets e.g [Typing Burst = 5], [Pause = 10s]
