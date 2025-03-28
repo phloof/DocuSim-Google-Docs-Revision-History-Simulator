@@ -3,390 +3,443 @@ import random
 import pynput
 import nltk
 from nltk.corpus import brown, words
+import traceback # For better error reporting
+import sys # To use exit()
+import datetime # For time formatting
+
+# --- NLTK Data Check and Download ---
+# (ensure_nltk_data function remains the same - included for completeness)
+def ensure_nltk_data(max_retries=3):
+    """
+    Downloads necessary NLTK data if not found. Checks all required data,
+    attempts to download missing items, and retries the check up to max_retries.
+    Exits the script if verification fails after all retries.
+    """
+    required_data = [
+        ('corpora', 'brown'),
+        ('corpora', 'words'),
+        ('tokenizers', 'punkt')
+    ]
+    retries = 0
+
+    while retries < max_retries:
+        all_found_this_pass = True
+        missing_items = []
+
+        print(f"\n--- NLTK Data Check (Attempt {retries + 1}/{max_retries}) ---")
+        for dtype, dname in required_data:
+            try:
+                if dtype == 'corpora':
+                    check_file = 'cats.txt' if dname == 'brown' else 'README'
+                    nltk.data.find(f'{dtype}/{dname}/{check_file}')
+                elif dtype == 'tokenizers':
+                    nltk.data.find(f'{dtype}/{dname}')
+                else:
+                     nltk.data.find(f'{dtype}/{dname}')
+                print(f"  [OK] Found: {dname}")
+            except LookupError:
+                print(f"  [MISSING] Data not found: {dname}")
+                all_found_this_pass = False
+                if dname not in missing_items: missing_items.append(dname)
+            except Exception as find_err:
+                 print(f"\nERROR checking NLTK data '{dname}': {find_err}")
+                 sys.exit(1)
+
+        if all_found_this_pass:
+            print("--- All required NLTK data verified. ---")
+            return True
+
+        if missing_items:
+            print(f"\nAttempting to download missing items: {', '.join(missing_items)}")
+            download_success_all = True
+            for dname in missing_items:
+                print(f"Downloading '{dname}'...")
+                try:
+                    success = nltk.download(dname, quiet=False)
+                    if not success: raise Exception(f"NLTK download function indicated failure for '{dname}'.")
+                    print(f"Completed download attempt for '{dname}'.")
+                    time.sleep(0.5)
+                except Exception as download_err:
+                    print(f"\nERROR: Failed to download NLTK data '{dname}': {download_err}")
+                    print(f"Consider manual download: python -m nltk.downloader {dname}")
+                    download_success_all = False
+
+            if not download_success_all: print("\nOne or more downloads failed during this attempt.")
+
+        retries += 1
+        if retries < max_retries:
+            print(f"\nDownloads attempted. Retrying NLTK data verification...")
+            time.sleep(1)
+
+    print(f"\nFATAL ERROR: Failed to verify required NLTK data after {max_retries} attempts.")
+    print("Required data:", [item[1] for item in required_data])
+    print("Please check your internet connection, permissions, and try manual download:")
+    for _, dname in required_data: print(f"  python -m nltk.downloader {dname}")
+    sys.exit(1)
+
+
+# --- Utility Functions ---
+
+def format_duration(seconds):
+    """Formats a duration in seconds into a human-readable string (e.g., 1h 15m 30s)."""
+    if seconds < 0: return "0s"
+    seconds = int(seconds)
+    days, seconds = divmod(seconds, 86400)
+    hours, seconds = divmod(seconds, 3600)
+    minutes, seconds = divmod(seconds, 60)
+    parts = []
+    if days > 0: parts.append(f"{days}d")
+    if hours > 0: parts.append(f"{hours}h")
+    if minutes > 0: parts.append(f"{minutes}m")
+    if seconds > 0 or not parts: parts.append(f"{seconds}s")
+    return " ".join(parts) if parts else "0s"
+
 
 def load_word_frequencies():
-    """Loads word frequencies from the Brown corpus, with handling for missing words."""
+    """Loads word frequencies from NLTK corpora."""
     try:
-        nltk.data.find('corpora/brown')
-        nltk.data.find('corpora/words')
-    except LookupError:
-        print("Downloading necessary NLTK corpora...")
-        nltk.download('brown')
-        nltk.download('words')
+        word_list_set = set(w.lower() for w in words.words())
+        brown_freq = nltk.FreqDist(w.lower() for w in brown.words())
+        freq_dict = {}
+        for word, freq in brown_freq.items(): freq_dict[word] = freq
+        for word in word_list_set:
+            if word not in freq_dict: freq_dict[word] = 1
+        if not freq_dict: raise ValueError("Frequency dictionary empty after loading.")
+        return freq_dict
+    except Exception as e:
+        print(f"\nERROR loading word frequencies: {e}")
+        return {"the": 1000, "a": 500, "is": 300} # Minimal fallback
 
-    word_list = words.words()  # For checking if a word exists
-    word_freq = nltk.FreqDist(w.lower() for w in brown.words()) #from brown corpus
-
-    # Create a dictionary with frequencies, handling words not in Brown
-    freq_dict = {}
-    for word in set(word_list): #use english word dictionary
-        freq_dict[word] = word_freq.get(word, 1)  # Default freq of 1 for unknown words
-
-    return freq_dict
 
 def calculate_sentence_complexity(sentence):
-    """Calculates a simple sentence complexity score based on length and punctuation."""
+    """Calculates a simple sentence complexity score."""
     words = sentence.split()
     num_words = len(words)
     num_commas = sentence.count(',')
     num_periods = sentence.count('.')
     num_colons_semicolons = sentence.count(':') + sentence.count(';')
-
-    # A very basic complexity metric:
-    complexity = num_words + 2 * num_commas + 3 * num_periods + 2.5 * num_colons_semicolons
-    return complexity
-
-def type_word(word, keyboard, word_freq, typo_prob, backspace_prob, capitalization_error_prob):
-    """Types a single word, with potential for typos, capitalization errors, and speed variation."""
-
-    original_word = word  # Store the original word
-
-    # --- CAPITALIZATION ERRORS ---
-    if random.random() < capitalization_error_prob:
-        if 'a' <= word[0] <= 'z':  # If it should be capitalized
-            correct_char = word[0].upper()
-            incorrect_char = word[0].lower()  # Incorrect capitalization
-        elif 'A' <= word[0] <= 'Z':  # If it should be lowercase
-            correct_char = word[0].lower()
-            incorrect_char = word[0].upper() # Incorrect capitalization
-        else:
-            correct_char = word[0]  #  handles edge cases like numbers/symbols.
-            incorrect_char = word[0]
-
-        # Only apply to the FIRST character
-        if incorrect_char != correct_char: # Only if a change is needed
-            keyboard.press(incorrect_char)  # Type the incorrect capitalization
-            keyboard.release(incorrect_char)
-            time.sleep(random.uniform(0.03, 0.1))  # Short delay
-            keyboard.press(pynput.keyboard.Key.backspace)  # Backspace
-            keyboard.release(pynput.keyboard.Key.backspace)
-            time.sleep(random.uniform(0.05, 0.15))
-            word = correct_char + word[1:] #rebuild word with correct capitalization
-
-
-
-    for i, char in enumerate(word):
-        # --- TYPO SIMULATION ---
-        if random.random() < typo_prob:
-            # 1. Wrong Key (adjacent key)
-            if random.random() < 0.6:
-                typo = get_adjacent_key(char)
-                if typo:
-                    keyboard.press(typo)
-                    keyboard.release(typo)
-                    time.sleep(random.uniform(0.03, 0.1))
-
-                    # Immediate Correction
-                    keyboard.press(pynput.keyboard.Key.backspace)
-                    keyboard.release(pynput.keyboard.Key.backspace)
-                    time.sleep(random.uniform(0.05, 0.15))
-                    keyboard.press(char)  # Type the correct key
-                    keyboard.release(char)
-                    time.sleep(random.uniform(0.03, 0.1))
-
-
-            # 2. Omitted Key
-            elif random.random() < 0.2:
-                # Immediate Correction (type the omitted key)
-                keyboard.press(char)
-                keyboard.release(char)
-                time.sleep(random.uniform(0.03, 0.1))
-
-            # 3. Repeated Key
-            else:
-                keyboard.press(char)
-                keyboard.release(char)
-                time.sleep(random.uniform(0.01, 0.05))
-                keyboard.press(char)
-                keyboard.release(char)
-                #Immediate correction
-                time.sleep(random.uniform(0.1, 0.4))
-                keyboard.press(pynput.keyboard.Key.backspace)
-                keyboard.release(pynput.keyboard.Key.backspace)
-                time.sleep(random.uniform(0.05, 0.15))
-
-
-        else: #if no typo
-            keyboard.press(char)
-            keyboard.release(char)
-
-        # --- WORD-LEVEL TIMING ---
-        word_frequency = word_freq.get(original_word.lower(), 1)  # Use original word for freq
-        base_delay = 0.2
-        frequency_factor = 1 / (word_frequency ** 0.2)
-        char_delay = random.uniform(0.03, base_delay * frequency_factor)
-        time.sleep(char_delay)
-
-
-
-def type_sentence(sentence, keyboard, word_freq, typo_prob=0.03, backspace_prob=0.4,
-                  burst_prob=0.5, burst_length_min=2, burst_length_max=5,
-                  grammatical_error_prob=0.02, punctuation_error_prob = 0.02, capitalization_error_prob = 0.05):
-    """Types a sentence with burst mode, errors, and complexity-based pacing."""
-
-    words = sentence.split()
-    sentence_complexity = calculate_sentence_complexity(sentence)
-    # --- GRAMMATICAL ERRORS ---
-    if random.random() < grammatical_error_prob:
-        error_type = random.choice(["tense", "plural", "article"])
-
-        if error_type == "tense" and len(words)> 3:
-            #Simple past/present swap. Very basic, and could be improved.
-            verb_index = random.randint(1, len(words) - 2)  # Avoid first/last word.
-            words[verb_index] = words[verb_index] + "ed"  # Not robust!
-
-        elif error_type == "plural" and len(words) > 2:
-            noun_index = random.randint(1, len(words)-1)
-            if words[noun_index].endswith('s'):
-                words[noun_index] = words[noun_index][:-1] #remove the s
-            else:
-                words[noun_index] = words[noun_index] + "s" #add s
-        elif error_type == "article" and len(words)>2:
-            #remove article
-            if words[0].lower() in ["a", "an", "the"]:
-                words.pop(0)
-
-    # --- PUNCTUATION ERRORS ---
-    if random.random() < punctuation_error_prob:
-        error_type = random.choice(["remove_comma", "add_comma", "wrong_end"])
-        if error_type == "remove_comma":
-            sentence = sentence.replace(",", "", 1) #remove 1 comma
-        elif error_type == "add_comma" and len(words) > 3:
-            add_index = random.randint(1, len(words)-2)
-            words.insert(add_index, ",")  #add comma in random place.
-        elif error_type == "wrong_end":
-            if sentence.endswith("."):
-                sentence = sentence[:-1] + random.choice(["!", "?", "..."]) #change ending punctuation
-
-    # --- END GRAMMATICAL/PUNCTUATION ERRORS ---
-    words = sentence.split() #redo split after punctuation edits and modifications
-    i = 0
-    while i < len(words):
-        # --- BURST MODE ---
-        if random.random() < burst_prob:
-            burst_length = random.randint(burst_length_min, burst_length_max)
-            burst_end = min(i + burst_length, len(words))
-            for j in range(i, burst_end):
-                type_word(words[j], keyboard, word_freq, typo_prob, backspace_prob, capitalization_error_prob)
-                if j < burst_end - 1:  # This check *is* needed for burst mode
-                    keyboard.press(pynput.keyboard.Key.space)
-                    keyboard.release(pynput.keyboard.Key.space)
-            i = burst_end  # Move index past the burst
-            #short pause AFTER burst
-            time.sleep(random.uniform(0.1,0.4))
-        # --- END BURST ---
-
-        else:  # Non-burst word
-            type_word(words[i], keyboard, word_freq, typo_prob, backspace_prob, capitalization_error_prob)
-            i += 1  # increment index
-
-        # --- ALWAYS ADD SPACE (and pause) AFTER TYPING A WORD ---Outside burst loop
-        if i < len(words):  # Don't add a space after the very last word
-            # Adjust pause based on sentence complexity. More complex = longer pause.
-            keyboard.press(pynput.keyboard.Key.space) #correctly adds spaces after all words.
-            keyboard.release(pynput.keyboard.Key.space)
-            pause_time = random.uniform(0.4, 1.0) * (1 + sentence_complexity / 50)  # Adjust scaling
-            time.sleep(pause_time)
-
-
+    complexity = num_words + 2 * num_commas + 1 * num_periods + 1.5 * num_colons_semicolons
+    normalized_complexity = min(max(complexity, 5), 100)
+    return normalized_complexity
 
 def get_adjacent_key(char):
     """Returns a random adjacent key on a QWERTY keyboard."""
+    # QWERTY Layout (US standard)
     keyboard_layout = {
-        'q': ['w', 'a'], 'w': ['q', 'e', 'a', 's'], 'e': ['w', 'r', 's', 'd'],
-        'r': ['e', 't', 'd', 'f'], 't': ['r', 'y', 'f', 'g'], 'y': ['t', 'u', 'g', 'h'],
-        'u': ['y', 'i', 'h', 'j'], 'i': ['u', 'o', 'j', 'k'], 'o': ['i', 'p', 'k', 'l'],
-        'p': ['o', 'l'],
-        'a': ['q', 'w', 's', 'z'], 's': ['w', 'e', 'a', 'd', 'z', 'x'],
-        'd': ['e', 'r', 's', 'f', 'x', 'c'], 'f': ['r', 't', 'd', 'g', 'c', 'v'],
-        'g': ['t', 'y', 'f', 'h', 'v', 'b'], 'h': ['y', 'u', 'g', 'j', 'b', 'n'],
-        'j': ['u', 'i', 'h', 'k', 'n', 'm'], 'k': ['i', 'o', 'j', 'l', 'm'],
-        'l': ['o', 'p', 'k'],
-        'z': ['a', 's', 'x'], 'x': ['z', 's', 'd', 'c'], 'c': ['x', 'd', 'f', 'v'],
-        'v': ['c', 'f', 'g', 'b'], 'b': ['v', 'g', 'h', 'n'], 'n': ['b', 'h', 'j', 'm'],
-        'm': ['n', 'j', 'k']
-
+        'q': ['w', 'a', 's', '1', '2'], 'w': ['q', 'e', 'a', 's', 'd', '2', '3'],
+        'e': ['w', 'r', 's', 'd', 'f', '3', '4'], 'r': ['e', 't', 'd', 'f', 'g', '4', '5'],
+        't': ['r', 'y', 'f', 'g', 'h', '5', '6'], 'y': ['t', 'u', 'g', 'h', 'j', '6', '7'],
+        'u': ['y', 'i', 'h', 'j', 'k', '7', '8'], 'i': ['u', 'o', 'j', 'k', 'l', '8', '9'],
+        'o': ['i', 'p', 'k', 'l', '9', '0'], 'p': ['o', 'l', '0', '['],
+        'a': ['q', 'w', 's', 'z', 'x'], 's': ['q', 'w', 'e', 'a', 'd', 'z', 'x', 'c'],
+        'd': ['w', 'e', 'r', 's', 'f', 'x', 'c', 'v'], 'f': ['e', 'r', 't', 'd', 'g', 'c', 'v', 'b'],
+        'g': ['r', 't', 'y', 'f', 'h', 'v', 'b', 'n'], 'h': ['t', 'y', 'u', 'g', 'j', 'b', 'n', 'm'],
+        'j': ['y', 'u', 'i', 'h', 'k', 'n', 'm'], 'k': ['u', 'i', 'o', 'j', 'l', 'm', ','],
+        'l': ['i', 'o', 'p', 'k', '.', ';'],
+        'z': ['a', 's', 'x'], 'x': ['a', 's', 'd', 'z', 'c'], 'c': ['s', 'd', 'f', 'x', 'v'],
+        'v': ['d', 'f', 'g', 'c', 'b'], 'b': ['f', 'g', 'h', 'v', 'n'], 'n': ['g', 'h', 'j', 'b', 'm'],
+        'm': ['h', 'j', 'k', 'n', ','],
+        '1': ['2', 'q'], '2': ['1', '3', 'q', 'w'], '3': ['2', '4', 'w', 'e'], '4': ['3', '5', 'e', 'r'],
+        '5': ['4', '6', 'r', 't'], '6': ['5', '7', 't', 'y'], '7': ['6', '8', 'y', 'u'],
+        '8': ['7', '9', 'u', 'i'], '9': ['8', '0', 'i', 'o'], '0': ['9', 'p', '-'],
+        '-': ['0', '=', '[', 'p'], '=': ['-', '['], '[': ['p', ']', '=', '-'], ']': ['[', '\\'], '\\': [']'],
+        ',': ['k', 'l', 'm', '.'], '.': [',', 'l', '/', ';'], '/': ['.', ';'], ';': ['l', '.', '/', '\''], '\'': [';', '[', ']']
     }
-    char = char.lower()
-    if char in keyboard_layout:
-        return random.choice(keyboard_layout[char])
-    else:
-        return None
+    char_lower = char.lower()
+    if char_lower in keyboard_layout: return random.choice(keyboard_layout[char_lower])
+    return None
 
-def falsify_google_docs_history(text, word_freq, min_interval=1, max_interval=5,
-                                 min_break=60, max_break=180,
-                                 min_sentences_per_session=3, max_sentences_per_session=7,
-                                 long_break_prob=0.1, long_break_min=900, long_break_max=2700,
-                                 typo_prob=0.015, backspace_prob=0.2, burst_prob=0.5,
-                                 burst_length_min=2, burst_length_max=5, grammatical_error_prob=0.01,
-                                 punctuation_error_prob= 0.01, capitalization_error_prob = 0.025):
-    """
-    Simulates typing text, with all the enhanced features.
-    """
+# --- Core Typing Simulation Functions ---
 
+def type_word(word, keyboard, word_freq, typo_prob, capitalization_error_prob, typing_speed_factor):
+    """Types a word char by char with delays, simulating and IMMEDIATELY correcting typos/caps errors."""
+    original_word = word
+    if not word: return
+
+    first_char_intended = word[0]; corrected_first_char_after_error = False
+
+    # Capitalization Error Simulation
+    if random.random() < capitalization_error_prob:
+        incorrect = None
+        if 'A' <= first_char_intended <= 'Z': incorrect = first_char_intended.lower()
+        if incorrect and incorrect != first_char_intended:
+            try:
+                keyboard.press(incorrect); keyboard.release(incorrect); time.sleep(random.uniform(0.04, 0.12) * typing_speed_factor)
+                keyboard.press(pynput.keyboard.Key.backspace); keyboard.release(pynput.keyboard.Key.backspace); time.sleep(random.uniform(0.05, 0.15) * typing_speed_factor)
+                corrected_first_char_after_error = True
+            except Exception as e: print(f"\nERROR simulating caps error: {e}")
+
+    # Character Typing Loop
+    for i, target_char in enumerate(word):
+        action_taken = False; typo_corrected = False
+        if i == 0 and corrected_first_char_after_error:
+            try: keyboard.press(target_char); keyboard.release(target_char); action_taken = True
+            except Exception as e: print(f"\nERROR typing corrected first char '{target_char}': {e}")
+        else:
+            make_typo = random.random() < typo_prob
+            if make_typo:
+                typo_type = random.random()
+                try:
+                    if typo_type < 0.6: # Wrong Key
+                        typo_char = get_adjacent_key(target_char)
+                        if typo_char:
+                            keyboard.press(typo_char); keyboard.release(typo_char); time.sleep(random.uniform(0.03, 0.1)*typing_speed_factor)
+                            keyboard.press(pynput.keyboard.Key.backspace); keyboard.release(pynput.keyboard.Key.backspace); time.sleep(random.uniform(0.05, 0.15)*typing_speed_factor)
+                            keyboard.press(target_char); keyboard.release(target_char); typo_corrected = True; action_taken = True
+                    elif typo_type < 0.8: # Omitted Key
+                         time.sleep(random.uniform(0.06, 0.25)*typing_speed_factor)
+                         keyboard.press(target_char); keyboard.release(target_char); typo_corrected = True; action_taken = True
+                    else: # Repeated Key
+                         keyboard.press(target_char); keyboard.release(target_char); time.sleep(random.uniform(0.01, 0.05)*typing_speed_factor)
+                         keyboard.press(target_char); keyboard.release(target_char); time.sleep(random.uniform(0.05, 0.15)*typing_speed_factor)
+                         keyboard.press(pynput.keyboard.Key.backspace); keyboard.release(pynput.keyboard.Key.backspace); typo_corrected = True; action_taken = True
+                except Exception as e:
+                    print(f"\nERROR during typo sim for '{target_char}': {e}")
+                    if not action_taken:
+                        try: keyboard.press(target_char); keyboard.release(target_char); action_taken = True
+                        except: pass # Best effort fallback
+            if not action_taken: # Type Correctly if no typo happened/failed
+                 try: keyboard.press(target_char); keyboard.release(target_char); action_taken = True
+                 except Exception as e: print(f"\nERROR typing char '{target_char}': {e}")
+
+        # Character Timing
+        word_frequency = word_freq.get(original_word.lower(), 1)
+        base_delay = 0.15; frequency_factor = max(0.5, min(2.0, 1 / (word_frequency ** 0.1)))
+        correction_delay = 1.5 if typo_corrected or corrected_first_char_after_error else 1.0
+        char_delay = random.uniform(0.02, base_delay * frequency_factor) * typing_speed_factor * correction_delay
+        time.sleep(max(0.005, char_delay))
+
+
+def type_sentence(sentence, keyboard, word_freq, burst_prob, burst_length_min, burst_length_max,
+                  typo_prob, capitalization_error_prob, typing_speed_factor):
+    """Types a sentence using word typer, handling bursts and spacing between words."""
+    words_to_type = sentence.split();
+    if not words_to_type: return
+    sentence_complexity = calculate_sentence_complexity(sentence)
+    i = 0
+    while i < len(words_to_type):
+        if i > 0: # Inter-Word Space (before word 1, 2, ...)
+            try: keyboard.press(pynput.keyboard.Key.space); keyboard.release(pynput.keyboard.Key.space)
+            except Exception as e: print(f"\nERROR typing space: {e}")
+            pause = random.uniform(0.2, 0.7) * (1 + sentence_complexity / 80.0) * typing_speed_factor
+            time.sleep(max(0.01, pause))
+        current_word_index = i; is_burst = False
+        if random.random() < burst_prob and (len(words_to_type) - i) >= burst_length_min: # Burst?
+            burst_len = random.randint(burst_length_min, burst_length_max); burst_end = min(i + burst_len, len(words_to_type))
+            if burst_end > i + 1: is_burst = True
+            for j in range(i, burst_end):
+                if j > i: # Space within burst
+                     try: keyboard.press(pynput.keyboard.Key.space); keyboard.release(pynput.keyboard.Key.space)
+                     except Exception as e: print(f"\nERROR typing burst space: {e}")
+                     time.sleep(random.uniform(0.015, 0.06) * typing_speed_factor)
+                type_word(words_to_type[j], keyboard, word_freq, typo_prob, capitalization_error_prob, typing_speed_factor)
+            i = burst_end
+        if not is_burst: # Single Word
+             if current_word_index < len(words_to_type):
+                 type_word(words_to_type[current_word_index], keyboard, word_freq, typo_prob, capitalization_error_prob, typing_speed_factor)
+                 i += 1
+             else: break
+
+
+def falsify_google_docs_history(text, word_freq, min_interval=1, max_interval=5, min_break=60, max_break=180,
+                                min_sentences_per_session=3, max_sentences_per_session=7, long_break_prob=0.1,
+                                long_break_min=900, long_break_max=2700, burst_prob=0.5, burst_length_min=2,
+                                burst_length_max=5, typo_prob=0.015, capitalization_error_prob=0.025,
+                                typing_speed_factor=1.0):
+    """Main simulation loop: paragraphs, sentences, sessions, breaks, estimates."""
     try:
-        nltk.data.find('tokenizers/punkt')
-    except LookupError:
-        print("Downloading punkt tokenizer...")
-        nltk.download('punkt')
-    # sentences = nltk.sent_tokenize(text) #DELTED
-    paragraphs = text.split("\n") # Split into paragraphs by new line
+        keyboard = pynput.keyboard.Controller()
+    except Exception as e: print(f"\nFATAL ERROR: Keyboard controller init failed: {e}"); sys.exit(1)
 
-    keyboard = pynput.keyboard.Controller()
+    paragraphs = text.split("\n")
 
-    # Give the user time to switch
-    print("You have 5 seconds to switch to the Google Docs document...")
+    # --- Calculate Estimate ---
+    estimated_duration_str = "Unknown"
+    formatted_completion_time = "Unknown"
+    try:
+        total_chars = len(text)
+        stripped_paragraphs = [p for p in paragraphs if p.strip()]
+        num_paragraphs = len(stripped_paragraphs)
+        total_sentences = sum(len(nltk.sent_tokenize(p)) for p in stripped_paragraphs) if stripped_paragraphs else 0
+
+        if total_chars > 0 and total_sentences > 0:
+            base_wpm = 50; chars_per_word = 5.5 # Estimation constants
+            estimated_typing_time_only = max(0, total_chars * (60 / (base_wpm * chars_per_word)) / typing_speed_factor)
+            avg_sentences_per_session = (min_sentences_per_session + max_sentences_per_session) / 2
+            num_sessions = total_sentences / avg_sentences_per_session if avg_sentences_per_session > 0 else 0
+            num_breaks = max(0, num_sessions - num_paragraphs)
+            num_long_breaks = num_breaks * long_break_prob
+            num_short_breaks = num_breaks * (1 - long_break_prob)
+            estimated_long_break_time = max(0, num_long_breaks * ((long_break_min + long_break_max) / 2) * typing_speed_factor)
+            estimated_short_break_time = max(0, num_short_breaks * ((min_break + max_break) / 2) * typing_speed_factor)
+            estimated_inter_sentence_time = max(0, total_sentences - num_paragraphs) * ((min_interval + max_interval) / 2) * typing_speed_factor
+            total_estimated_duration = (estimated_typing_time_only + estimated_long_break_time +
+                                        estimated_short_break_time + estimated_inter_sentence_time)
+            estimated_duration_str = format_duration(total_estimated_duration)
+            start_timestamp = time.time()
+            estimated_completion_timestamp = start_timestamp + total_estimated_duration
+            completion_dt = datetime.datetime.fromtimestamp(estimated_completion_timestamp)
+            formatted_completion_time = completion_dt.strftime("%Y-%m-%d %H:%M:%S")
+        elif total_chars > 0:
+            print("Warning: Text found but could not tokenize into sentences for full estimate.")
+            base_wpm = 50; chars_per_word = 5.5
+            total_estimated_duration = max(0, total_chars * (60 / (base_wpm * chars_per_word)) / typing_speed_factor)
+            estimated_duration_str = format_duration(total_estimated_duration) + " (typing only)"
+            start_timestamp = time.time()
+            estimated_completion_timestamp = start_timestamp + total_estimated_duration
+            completion_dt = datetime.datetime.fromtimestamp(estimated_completion_timestamp)
+            formatted_completion_time = completion_dt.strftime("%Y-%m-%d %H:%M:%S") + " (typing only)"
+        else:
+             estimated_duration_str = "0s"
+             formatted_completion_time = "N/A (No text)"
+    except Exception as est_err:
+        print(f"\nWarning: Could not calculate time estimate: {est_err}")
+    # --- End Estimate ---
+
+    print(f"\nCurrent Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Estimated Total Duration: ~{estimated_duration_str}")
+    print(f"Estimated Completion Time: ~{formatted_completion_time}")
+    print("\nYou have 5 seconds to switch to the target window...")
     time.sleep(5)
-    print("Starting to type...")
+    actual_start_time = time.time()
+    print("Starting typing simulation...")
 
+    # --- Main Typing Loop ---
+    for para_index, paragraph in enumerate(paragraphs):
+        stripped_paragraph = paragraph.strip()
+        if not stripped_paragraph: # Handle blank lines
+             if para_index < len(paragraphs) - 1:
+                next_para_is_empty = (para_index + 1 < len(paragraphs) and not paragraphs[para_index+1].strip())
+                if not next_para_is_empty:
+                    try: keyboard.press(pynput.keyboard.Key.enter); keyboard.release(pynput.keyboard.Key.enter); time.sleep(random.uniform(0.4, 1.2)*typing_speed_factor)
+                    except Exception as e: print(f"\nERROR typing Enter for blank line: {e}")
+             continue
 
-    # sentences_typed = 0 # DELETED
-    for paragraph in paragraphs:
-        sentences = nltk.sent_tokenize(paragraph) # Sentence tokenization within each paragraph
-        sentences_typed = 0 #reset sentences_typed counter at the start of each paragraph
-        while sentences_typed < len(sentences):
-            # --- TYPING SESSION ---
-            num_sentences_this_session = random.randint(min_sentences_per_session, max_sentences_per_session)
-            sentences_to_type = min(num_sentences_this_session, len(sentences) - sentences_typed)
+        try: sentences = nltk.sent_tokenize(stripped_paragraph)
+        except Exception as e: print(f"\nERROR tokenizing para: '{stripped_paragraph[:50]}...'. {e}. Skipping."); continue
+        if not sentences: continue
 
-            for _ in range(sentences_to_type):
-                type_sentence(sentences[sentences_typed], keyboard, word_freq, typo_prob, backspace_prob,
-                              burst_prob, burst_length_min, burst_length_max, grammatical_error_prob,
-                              punctuation_error_prob, capitalization_error_prob)
-                sentences_typed += 1
-                # --- INTER-SENTENCE INTERVAL ---
-                if sentences_typed < len(sentences):  # Only pause if there are more sentences
-                    interval = random.uniform(min_interval, max_interval)
-                    time.sleep(interval)
+        num_sentences_in_para = len(sentences); sentences_typed_in_para = 0
+        while sentences_typed_in_para < num_sentences_in_para: # Session loop
+            num_sentences_this = random.randint(min_sentences_per_session, max_sentences_per_session)
+            session_end = min(sentences_typed_in_para + num_sentences_this, num_sentences_in_para)
+            for k in range(sentences_typed_in_para, session_end):
+                # Type the current sentence
+                type_sentence(sentences[k], keyboard, word_freq, burst_prob, burst_length_min, burst_length_max,
+                              typo_prob, capitalization_error_prob, typing_speed_factor)
+                sentences_typed_in_para += 1
 
+                # === INTER-SENTENCE SPACING FIX ===
+                # Add space(s) and pause if not the very last sentence in the paragraph
+                if sentences_typed_in_para < num_sentences_in_para:
+                    try:
+                        # Add TWO spaces after sentence-ending punctuation (common convention)
+                        keyboard.press(pynput.keyboard.Key.space); 
 
-            # --- BREAKS ---
-            if sentences_typed < len(sentences):
-                # --- LONG BREAK ---
+                    except Exception as e:
+                        print(f"\nERROR typing inter-sentence space: {e}")
+
+                    # Now, apply the longer pause *after* the spaces
+                    interval = random.uniform(min_interval, max_interval) * typing_speed_factor
+                    time.sleep(max(0.01, interval))
+                # === END FIX ===
+
+            # --- Break logic ---
+            if session_end < num_sentences_in_para: # Break between sessions
+                duration = 0; break_type = "short"
                 if random.random() < long_break_prob:
-                    break_duration = random.uniform(long_break_min, long_break_max)
-                    print(f"Taking a loooooooooong break for {break_duration:.2f} seconds...")
-                    time.sleep(break_duration)
+                    duration = random.uniform(long_break_min, long_break_max) * typing_speed_factor; break_type = "long"
+                else: duration = random.uniform(min_break, max_break) * typing_speed_factor
+                print(f"\nTaking a {break_type} break for {format_duration(duration)}...")
+                time.sleep(max(0.1, duration)); print("Resuming typing...")
+            # --- End Break Logic ---
 
-                # --- REGULAR BREAK ---
-                else:
-                    break_duration = random.uniform(min_break, max_break)
-                    print(f"Taking a break for {break_duration:.2f} seconds...")
-                    time.sleep(break_duration)
-        #Paragraph handling
-        if paragraph != "": #check if paragraph isn't empty.
-            keyboard.press(pynput.keyboard.Key.enter) #press enter after each paragraph
-            keyboard.release(pynput.keyboard.Key.enter)
-            time.sleep(random.uniform(0.5,1.5)) #pause after enter
+        # --- End of Paragraph Enter ---
+        if para_index < len(paragraphs) - 1:
+            try: keyboard.press(pynput.keyboard.Key.enter); keyboard.release(pynput.keyboard.Key.enter); time.sleep(random.uniform(0.5, 1.5)*typing_speed_factor)
+            except Exception as e: print(f"\nERROR typing paragraph Enter: {e}")
+        # --- End EOP ---
+    # --- End Main Loop ---
+
+    actual_end_time = time.time()
+    actual_total_duration = actual_end_time - actual_start_time
+    print(f"\nTyping complete.")
+    print(f"Actual Total Duration: {format_duration(actual_total_duration)}")
+    if formatted_completion_time != "Unknown" and formatted_completion_time != "N/A (No text)":
+         print(f"(Original Estimated Completion Time was: ~{formatted_completion_time})")
 
 
-    print("Typing complete.")
-
-
+# --- Main Execution Logic ---
 
 def main():
-    # Get text input
+    # --- Ensure NLTK Data ---
+    ensure_nltk_data()
+
+    # --- Get Text Input ---
     text = ""
-    print("Enter the text (type 'END' on a new line to finish):")
+    print("\nEnter/Paste the text. Press Ctrl+D (Unix) or Ctrl+Z+Enter (Windows) when done.")
+    print("Alternatively, type 'END' on a new line to finish:")
+    lines = []
     while True:
-        line = input()
-        if line == "END":
-            break
-        text += line + "\n"
+        try: line = input(); lines.append(line)
+        except EOFError: print("\nEOF detected, finishing input."); break
+        except KeyboardInterrupt: print("\nInput interrupted. Exiting."); return
+        if line.strip().upper() == "END": lines.pop(); break
+    text = "\n".join(lines)
+    if not text.strip(): print("No text provided. Exiting."); return
 
-    # Default Parameters - Reduced Error Rates
-    min_interval = 3
-    max_interval = 17
-    min_break = 60
-    max_break = 180
-    min_sentences = 3
-    max_sentences = 7
-    long_break_prob = 0.05
-    long_break_min = 300
-    long_break_max = 600
-    typo_prob = 0.015  # Reduced by half
-    backspace_prob = 0.2  # Reduced by half (backspace prob. is tied to typo prob.)
-    burst_prob = 0.5
-    burst_length_min = 2
-    burst_length_max = 5
-    grammatical_error_prob = 0.01  # Reduced by half
-    punctuation_error_prob = 0.01  # Reduced by half
-    capitalization_error_prob = 0.025  # Reduced by half
+    # --- Parameters ---
+    min_interval=1.5; max_interval=6; min_break=30; max_break=75; min_sentences=2; max_sentences=5
+    long_break_prob=0.07; long_break_min=90; long_break_max=300; burst_prob=0.4; burst_length_min=2
+    burst_length_max=4; typo_prob=0.02; capitalization_error_prob=0.03; typing_speed_factor=2
 
-    # Ask if the user wants custom parameters
-    customize = input("Do you want to customize the typing parameters? (y/n, default n): ").strip().lower()
-
+    customize = input("Customize parameters (timing, errors, etc.)? (y/n, default n): ").strip().lower()
     if customize == 'y':
-        # Get user input for parameters (ONLY if they chose to customize)
-        while True:
+         print("--- Customizing Parameters ---")
+         while True: # Input loop for customization
             try:
-                min_interval = int(input(f"Enter minimum sentence interval in seconds (default {min_interval}): ") or min_interval)
-                max_interval = int(input(f"Enter maximum sentence interval in seconds (default {max_interval}): ") or max_interval)
-                if min_interval < 0 or max_interval < min_interval:
-                    raise ValueError("Invalid interval valuues.")
+                min_interval = float(input(f"Min sentence interval sec (def {min_interval}): ") or min_interval)
+                max_interval = float(input(f"Max sentence interval sec (def {max_interval}): ") or max_interval)
+                min_break = int(input(f"Min short break sec (def {min_break}): ") or min_break)
+                max_break = int(input(f"Max short break sec (def {max_break}): ") or max_break)
+                min_sentences = int(input(f"Min sentences/session (def {min_sentences}):") or min_sentences)
+                max_sentences = int(input(f"Max sentences/session (def {max_sentences}):") or max_sentences)
+                long_break_prob = float(input(f"Long break probability (0-1, def {long_break_prob}): ") or long_break_prob)
+                long_break_min = int(input(f"Min long break sec (def {long_break_min}): ") or long_break_min)
+                long_break_max = int(input(f"Max long break sec (def {long_break_max}): ") or long_break_max)
+                burst_prob = float(input(f"Burst probability (0-1, def {burst_prob}): ") or burst_prob)
+                burst_length_min = int(input(f"Min burst length words (def {burst_length_min}): ") or burst_length_min)
+                burst_length_max = int(input(f"Max burst length words (def {burst_length_max}): ") or burst_length_max)
+                typo_prob = float(input(f"Typo probability per char (0-1, def {typo_prob}): ") or typo_prob)
+                capitalization_error_prob = float(input(f"Capitalization error prob (0-1, def {capitalization_error_prob}): ") or capitalization_error_prob)
+                typing_speed_factor = float(input(f"Typing speed factor (>0, 1=normal, def {typing_speed_factor}): ") or typing_speed_factor)
+                # Validations
+                if not (0.0 <= long_break_prob <= 1.0 and 0.0 <= burst_prob <= 1.0 and \
+                        0.0 <= typo_prob <= 1.0 and 0.0 <= capitalization_error_prob <= 1.0): raise ValueError("Probs must be 0-1")
+                if min_interval < 0 or max_interval < min_interval: raise ValueError("Invalid interval")
+                if min_break < 0 or max_break < min_break: raise ValueError("Invalid break duration")
+                if min_sentences <= 0 or max_sentences < min_sentences: raise ValueError("Invalid sentences/session")
+                if long_break_min < 0 or long_break_max < long_break_min: raise ValueError("Invalid long break duration")
+                if burst_length_min < 1 or burst_length_max < burst_length_min: raise ValueError("Invalid burst length (min 1)")
+                if typing_speed_factor <= 0: raise ValueError("Typing speed factor must be positive")
+                break # Exit input loop if all valid
+            except ValueError as e: print(f"Invalid input: {e}. Please enter valid values."); continue
+            except Exception as e: print(f"An error occurred during input: {e}"); continue
 
-                min_break = int(input(f"Enter minimum short break duration in seconds (default {min_break}): ") or min_break)
-                max_break = int(input(f"Enter maximum short break duration in seconds (default {max_break}): ") or max_break)
-                if min_break < 0 or max_break < min_break:
-                    raise ValueError("Invalid break durration valuues.")
-
-                min_sentences = int(input(f"Enter the minimum number of sentences per session (default {min_sentences}):") or min_sentences)
-                max_sentences = int(input(f"Enter the maximum number of sentences per session(default {max_sentences}):") or max_sentences)
-                if min_sentences <= 0 or max_sentences < min_sentences:
-                    raise ValueError("Invalid sentences per session valuues.")
-
-                long_break_prob = float(input(f"Enter the probability of a long break (0.0 to 1.0, default {long_break_prob}): ") or long_break_prob)
-                if not 0.0 <= long_break_prob <= 1.0:
-                    raise ValueError("Long break probability must be between 0.0 and 1.0.")
-
-                long_break_min = int(input(f"Enter minimum long break duration in seconds (default {long_break_min}): ") or long_break_min)
-                long_break_max = int(input(f"Enter maximum long break duration in seconds (default {long_break_max}): ") or long_break_max)
-                if long_break_min < 0 or long_break_max < long_break_min:
-                    raise ValueError("Invalid long break duration values.")
-
-                typo_prob = float(input(f"Enter probability of a typo (0.0 to 1.0, default {typo_prob}): ") or typo_prob)
-                if not 0.0 <= typo_prob <= 1.0:
-                    raise ValueError("Typo probability must be between 0.0 and 1.0.")
-
-                backspace_prob = float(input(f"Enter probability of correcting a typo with backspace (0.0 to 1.0, default {backspace_prob}): ") or backspace_prob)
-                if not 0.0 <= backspace_prob <= 1.0:
-                    raise ValueError("Backspace probability must be between 0.0 and 1.0.")
-
-                burst_prob = float(input(f"Enter probability of a typing burst (0.0 to 1.0, default {burst_prob}): ") or burst_prob)
-                if not 0.0 <= burst_prob <= 1.0:
-                    raise ValueError("Burst probability must be between 0.0 and 1.0.")
-
-                burst_length_min = int(input(f"Enter minimum burst length (words, default {burst_length_min}): ") or burst_length_min)
-                burst_length_max = int(input(f"Enter maximum burst length (words, default {burst_length_max}): ") or burst_length_max)
-                if burst_length_min <= 0 or burst_length_max < burst_length_min:
-                    raise ValueError("Invalid burst length values.")
-
-                grammatical_error_prob = float(input(f"Enter probability of a grammatical error (0.0 to 1.0, default {grammatical_error_prob}): ") or grammatical_error_prob)
-                if not 0.0 <= grammatical_error_prob <= 1.0:
-                    raise ValueError("grammatical error probability must be between 0.0 and 1.0")
-
-                punctuation_error_prob = float(input(f"Enter probability of a punctuation error (0.0 to 1.0, default {punctuation_error_prob}): ") or punctuation_error_prob)
-                if not 0.0 <= punctuation_error_prob <= 1.0:
-                    raise ValueError("Punctuation error probability must be between 0.0 and 1.0.")
-
-                capitalization_error_prob = float(input(f"Enter probability of a capitalization error (0.0 to 1.0, default {capitalization_error_prob}): ") or capitalization_error_prob)
-                if not 0.0 <= capitalization_error_prob <= 1.0:
-                    raise ValueError("Capitalization error probability must be between 0.0 and 1.0.")
-
-                break  # Exit input loop after successful custom input
-
-            except ValueError as e:
-                print(f"Invalid input: {e}.  Please enter valid values.")
-
-    # Load word frequencies (do this *after* getting user input, but *before* typing)
+    # --- Load Frequencies ---
+    print("\nLoading word frequencies...")
     word_freq = load_word_frequencies()
+    if not word_freq or len(word_freq)<10: print("Word freq loading failed. Exiting."); sys.exit(1)
+    print("Frequencies loaded.")
 
-    # Call falsify_google_docs_history (OUTSIDE the if statement)
-    falsify_google_docs_history(text, word_freq, min_interval, max_interval, min_break, max_break,
-                                 min_sentences, max_sentences, long_break_prob, long_break_min,
-                                 long_break_max, typo_prob, backspace_prob, burst_prob,
-                                 burst_length_min, burst_length_max, grammatical_error_prob,
-                                 punctuation_error_prob, capitalization_error_prob)
+    # --- Run Simulation ---
+    try:
+        falsify_google_docs_history(text, word_freq, min_interval, max_interval, min_break, max_break,
+                                    min_sentences, max_sentences, long_break_prob, long_break_min,
+                                    long_break_max, burst_prob, burst_length_min, burst_length_max,
+                                    typo_prob, capitalization_error_prob, typing_speed_factor)
+    except KeyboardInterrupt: print("\nTyping interrupted by user.")
+    except Exception as e: print(f"\nUnexpected error during simulation: {e}"); traceback.print_exc()
 
 if __name__ == "__main__":
     main()
