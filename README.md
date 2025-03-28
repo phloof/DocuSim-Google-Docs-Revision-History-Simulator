@@ -77,9 +77,9 @@ DocuSim offers extensive parameter customization:
 
 ## Installation and Usage
 
-1.  **Install Dependencies:**
+1.  **Install Dependencies:** could be others i dont remember
     ```bash
-    pip install pynput nltk
+    pip install pynput nltk pynput
     ```
 
 2.  **Download NLTK Data (if needed):**  The first time you run the script, it will attempt to download necessary NLTK corpora (Brown corpus, words, and punkt tokenizer).  You may see prompts for this.
